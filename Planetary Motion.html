@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Capstone Physics Project Planetary Simulation</title>
+<style>
+  /* Basic styling for the page, the controls panel, and the canvas */
+
+  body {
+    margin: 0;
+    background: #000;
+    overflow: hidden;
+    color: #fff;
+    font-family: sans-serif;
+  }
+
+  #controls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    padding: 10px;
+    border-radius: 5px;
+  }
+
+  #controls label {
+    display: block;
+    margin-bottom: 5px;
+  }
+
+  #controls input[type=number], 
+  #controls input[type=range] {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+
+  #controls button {
+    width: 100%;
+    padding: 8px;
+    margin-top: 10px;
+    background: #444;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    border-radius: 3px;
+  }
+
+  #controls button:hover {
+    background: #666;
+  }
+
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+<!-- A controls panel that lets the user input parameters and toggle display options -->
+<div id="controls">
+  <h2>Simulation Controls</h2>
+
+  <!-- Mass of the star. Adjusting M changes gravitational strength since G=1 -->
+  <label>Mass of Star (M): 
+    <input type="number" id="massInput" min="0.1" step="0.1" value="1">
+  </label>
+
+  <!-- Initial radius (R) at which the planet starts -->
+  <label>Initial Radius (R): 
+    <input type="number" id="radiusInput" min="50" step="10" value="200">
+  </label>
+
+  <!-- Velocity factor that multiplies the circular orbit speed to set initial velocity -->
+  <label>Velocity Factor: 
+    <input type="range" id="velocityFactorInput" min="0.1" max="2" step="0.1" value="1">
+  </label>
+  <span id="velocityFactorValue">1</span> (multiplies circular orbit speed)
+  
+  <!-- Time step (dt) for the numerical integration. Smaller values = more accuracy, but slower -->
+  <label>Time Step (dt): 
+    <input type="number" id="dtInput" min="0.1" step="0.01" value="0.5">
+  </label>
+
+  <!--<label>Simulation Speed: 
+    <input type="number" id="simulationSpeed" min="1" step="1" value="1">
+  </label>
+-->
+<label>Simulation Speed: 
+  <input type="range" id="simulationSpeed" min="1" max="100" step="1" value="1">
+</label>
+
+  <!-- Checkbox to toggle whether the trace of the planet's path is shown -->
+  <label>
+    <input type="checkbox" id="traceCheckbox" checked> Show Trace
+  </label>
+  <button id="clrBtn">Clear Trace</button>
+  <!-- Button to apply the chosen parameters and restart the simulation -->
+  <button id="applyBtn">Apply & Restart</button>
+
+  <p>Press Space to pause/resume</p>
+  <p>Capstone Physics Project</p>
+</div>
+
+<!-- Canvas where the simulation (star, planet, and trace) is drawn -->
+<canvas id="simulation"></canvas>
+
+<script>
+
+// Get the canvas and its rendering context
+const canvas = document.getElementById('simulation');
+const ctx = canvas.getContext('2d');
+
+// Make the canvas fill the entire browser window
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Grab references to the HTML input elements
+const massInput = document.getElementById('massInput');
+const radiusInput = document.getElementById('radiusInput');
+const velocityFactorInput = document.getElementById('velocityFactorInput');
+const velocityFactorValue = document.getElementById('velocityFactorValue');
+const dtInput = document.getElementById('dtInput');
+const simSpeed = document.getElementById('simulationSpeed');
+console.log(simSpeed)
+const applyBtn = document.getElementById('applyBtn');
+const traceCheckbox = document.getElementById('traceCheckbox');
+const clearButton=document.getElementById('clrBtn')
+
+// Update the displayed velocity factor as the slider moves
+velocityFactorInput.addEventListener('input', () => {
+  velocityFactorValue.textContent = velocityFactorInput.value;
+});
+
+// Simulation variables (will be set in initializeSimulation())
+let GM;     // Gravitational parameter G*M (with G=1)
+let R;      // Initial radius (distance from star)
+let vx;     // Planet's velocity in x-direction
+let vy;     // Planet's velocity in y-direction
+let x;      // Planet's current x-position
+let y;      // Planet's current y-position
+let dt;     // Time step for integration
+let isPaused = false;   // Pause state
+let showTrace = traceCheckbox.checked; // Whether to show the trajectory trace
+let simRate;
+let vx2;     // Planet's velocity in x-direction
+let vy2;     // Planet's velocity in y-direction
+let x2;      // Planet's current x-position
+let y2;      // Planet's current y-position
+//let ax2;
+//let ax1;
+
+// If the checkbox changes, update the showTrace variable
+traceCheckbox.addEventListener('change', () => {
+  showTrace = traceCheckbox.checked;
+});
+
+simulationSpeed.addEventListener('change', () => {
+  simRate=document.getElementById('simulationSpeed').value;
+});
+
+clearButton.addEventListener('click', () => {
+  clearTrace();
+});
+
+
+
+
+// Array to store all previous positions for the trace
+let positions = [];
+let positions2= [];
+
+// Allow pausing the simulation with the spacebar
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    isPaused = !isPaused;
+  }
+  if (e.code === 'ArrowLeft') {
+    vxIncrease();
+  }
+  if (e.code === 'ArrowRight') {
+    vxDecrease();
+  }
+  if (e.code === 'ArrowUp') {
+    vyIncrease();
+  }
+  if (e.code === 'ArrowDown') {
+    vyDecrease();
+  }
+});
+
+let dv=0.01
+function vxIncrease(){
+  vx-=dv
+}
+function vxDecrease(){
+  vx+=dv
+}
+function vyDecrease(){
+  vy+=dv
+}
+function vyIncrease(){
+  vy-=dv
+}
+/**
+ * Initialize or re-initialize the simulation with current UI parameters.
+ * This sets up the initial position, velocity, and clears the trace.
+ */
+function initializeSimulation() {
+  // Get user parameters from inputs
+  const M = parseFloat(massInput.value);
+  R = parseFloat(radiusInput.value);
+  dt = parseFloat(dtInput.value);
+  simRate=parseFloat(simSpeed.value)
+  // Since we set G=1, GM = M
+  GM = M;
+
+  // Compute the speed for a circular orbit: v_circ = sqrt(GM/R)
+  const vCirc = Math.sqrt(GM / R);
+  const velocityFactor = parseFloat(velocityFactorInput.value);
+
+  // Start the planet at (R,0) on the x-axis
+  x = R;
+  y = 0;
+  R2=R*0.9
+  const vCirc2 = Math.sqrt(GM / R2);
+  x2 = R2;
+  y2 = 0;
+
+
+  // Give the planet initial velocity perpendicular to the radius for orbit
+  // v_y = v_circ * velocityFactor
+  vx = 0;
+  vy = vCirc * velocityFactor;
+
+  vx2 = 0;
+  vy2 = vCirc2 * velocityFactor;
+
+
+  // Ensure the simulation is running
+  isPaused = false;
+  
+  // Clear previous trace data and store the initial position
+  positions = [];
+  positions.push({x, y});
+  positions2.push({x2, y2});
+
+}
+
+function clearTrace(){
+  positions = [];
+  positions2 =[];
+  //initializeSimulation();
+}
+
+/**
+ * Compute the gravitational acceleration on the planet at (x,y).
+ * a = -GM / r^3 * (x, y)
+ */
+function computeAcceleration(x3, y3) {
+  const r = Math.sqrt(x3*x3 + y3*y3); // Distance from the origin
+  const factor = -GM / (r*r*r);   // Factor from the gravitational formula
+  const ax = factor * x3;          // a_x
+  const ay = factor * y3;          // a_y
+  return [ax, ay]
+}
+
+/**
+ * Update the planet's position and velocity using a time-stepping method.
+ * We use a semi-implicit Euler method:
+ *   v <- v + a*dt
+ *   x <- x + v*dt
+ */
+function update() {
+  // Compute acceleration at the current position
+  const [ax2, ay2] = computeAcceleration(x2, y2);
+  const [ax, ay] = computeAcceleration(x, y);
+  
+  // Update velocity
+  vx += ax * dt;
+  vy += ay * dt;
+  vx2 += ax2 * dt;
+  vy2 += ay2 * dt;
+  // Update position
+  x += vx * dt;
+  y += vy * dt;
+  x2 += vx2*dt;
+  y2 += vy2*dt;
+  // Record the new position for trace drawing
+  positions.push({x, y});
+  positions2.push({x2,y2});
+  //if(positions.length>1000000){
+   // positions.shift()
+ // }
+}
+
+/**
+ * Draw the star, the planet, and if enabled, the trace of the planet's path.
+ */
+function draw() {
+  // Clear the entire canvas before redrawing
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Move the origin of the drawing context to the center of the canvas
+  ctx.save();
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+
+  // Apply a scaling factor so we can see the orbit nicely on screen
+  const scale = 1.5; 
+  ctx.scale(scale, scale);
+
+  // Draw the star at the origin (0,0)
+  ctx.beginPath();
+  ctx.arc(0, 0, 5, 0, 2*Math.PI);
+  ctx.fillStyle = 'blue';
+  ctx.fill();
+
+  // If the trace is enabled and we have multiple points, draw the path
+  if (showTrace && positions.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(173,216,230,0.7)'; // Lightblue color with transparency
+    ctx.lineWidth = 1;
+    ctx.moveTo(positions[0].x, positions[0].y);
+    for (let i = 1; i < positions.length; i++) {
+      ctx.lineTo(positions[i].x, positions[i].y);
+    }
+    ctx.stroke();
+  };
+
+  if (showTrace && positions2.length > 1) {
+    
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(236, 217, 221, 1)'; // Lightblue color with transparency
+  ctx.lineWidth = 1;
+  ctx.moveTo(positions2[0].x2, positions2[0].y2);
+    for (let i = 1; i < positions2.length; i++) {
+     ctx.lineTo(positions2[i].x2, positions2[i].y2);
+     //console.log(positions2[i].x2)
+    }
+    ctx.stroke();
+  };
+  //
+  // Draw the planet as a small circle at its current position
+  ctx.beginPath();
+  ctx.arc(x, y, 3, 0, 2*Math.PI);
+  ctx.fillStyle = 'lightblue';
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(x2, y2, 3, 0, 2*Math.PI);
+  ctx.fillStyle = 'red';
+  ctx.fill();
+  ctx.restore(); // Restore the coordinate system back to default
+}
+
+/**
+ * The main animation loop:
+ * - If not paused, update the physics
+ * - Draw the current state
+ * - Request the next frame
+ */
+
+function animate() {
+  if (!isPaused) {
+    for(let i = 0; i < (2*simRate); i++){
+      update();
+    }
+    
+  }
+  
+  
+  draw();
+  requestAnimationFrame(animate);
+  
+  
+  
+  
+}
+
+// When the "Apply & Restart" button is clicked, re-initialize the simulation
+applyBtn.addEventListener('click', () => {
+  initializeSimulation();
+});
+
+// Initialize simulation parameters and start the animation loop
+initializeSimulation();
+animate();
+</script>
+
+</body>
+</html>
